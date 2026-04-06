@@ -19,12 +19,14 @@ export type {
   SshSandboxSession,
   SshSandboxSettings,
 } from "../agents/sandbox.js";
+export type { OpenClawConfig } from "../config/config.js";
 
 export {
   buildExecRemoteCommand,
   buildRemoteCommand,
   buildSshSandboxArgv,
   createRemoteShellSandboxFsBridge,
+  createWritableRenameTargetResolver,
   createSshSandboxSessionFromConfigText,
   createSshSandboxSessionFromSettings,
   disposeSshSandboxSession,
@@ -32,7 +34,10 @@ export {
   getSandboxBackendManager,
   registerSandboxBackend,
   requireSandboxBackendFactory,
+  resolveWritableRenameTargets,
+  resolveWritableRenameTargetsForBridge,
   runSshSandboxCommand,
+  sanitizeEnvVars,
   shellEscape,
   uploadDirectoryToSshTarget,
 } from "../agents/sandbox.js";

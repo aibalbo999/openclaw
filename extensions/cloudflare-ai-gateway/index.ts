@@ -1,81 +1,27 @@
-import { emptyPluginConfigSchema, type OpenClawPluginApi } from "openclaw/plugin-sdk/core";
-import { upsertAuthProfile } from "../../src/agents/auth-profiles.js";
-import { ensureAuthProfileStore, listProfilesForProvider } from "../../src/agents/auth-profiles.js";
+import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
+import {
+  applyAuthProfileConfig,
+  buildApiKeyCredential,
+  ensureApiKeyFromOptionEnvOrPrompt,
+  ensureAuthProfileStore,
+  listProfilesForProvider,
+  normalizeApiKeyInput,
+  normalizeOptionalSecretInput,
+  type SecretInput,
+  upsertAuthProfile,
+  validateApiKeyInput,
+} from "openclaw/plugin-sdk/provider-auth";
+import { buildCloudflareAiGatewayCatalogProvider } from "./catalog-provider.js";
 import {
   buildCloudflareAiGatewayModelDefinition,
-  resolveCloudflareAiGatewayBaseUrl,
-} from "../../src/agents/cloudflare-ai-gateway.js";
-import { resolveNonEnvSecretRefApiKeyMarker } from "../../src/agents/model-auth-markers.js";
-import {
-  normalizeApiKeyInput,
-  validateApiKeyInput,
-} from "../../src/commands/auth-choice.api-key.js";
-import { ensureApiKeyFromOptionEnvOrPrompt } from "../../src/commands/auth-choice.apply-helpers.js";
-import { buildApiKeyCredential } from "../../src/commands/onboard-auth.credentials.js";
-import {
-  applyCloudflareAiGatewayConfig,
-  applyAuthProfileConfig,
   CLOUDFLARE_AI_GATEWAY_DEFAULT_MODEL_REF,
-} from "../../src/commands/onboard-auth.js";
-import type { SecretInput } from "../../src/config/types.secrets.js";
-import { coerceSecretRef } from "../../src/config/types.secrets.js";
-import { normalizeOptionalSecretInput } from "../../src/utils/normalize-secret-input.js";
+  resolveCloudflareAiGatewayBaseUrl,
+} from "./models.js";
+import { applyCloudflareAiGatewayConfig, buildCloudflareAiGatewayConfigPatch } from "./onboard.js";
 
 const PROVIDER_ID = "cloudflare-ai-gateway";
 const PROVIDER_ENV_VAR = "CLOUDFLARE_AI_GATEWAY_API_KEY";
 const PROFILE_ID = "cloudflare-ai-gateway:default";
-
-function resolveApiKeyFromCredential(
-  cred: ReturnType<typeof ensureAuthProfileStore>["profiles"][string] | undefined,
-): string | undefined {
-  if (!cred || cred.type !== "api_key") {
-    return undefined;
-  }
-
-  const keyRef = coerceSecretRef(cred.keyRef);
-  if (keyRef && keyRef.id.trim()) {
-    return keyRef.source === "env"
-      ? keyRef.id.trim()
-      : resolveNonEnvSecretRefApiKeyMarker(keyRef.source);
-  }
-  return cred.key?.trim() || undefined;
-}
-
-function resolveMetadataFromCredential(
-  cred: ReturnType<typeof ensureAuthProfileStore>["profiles"][string] | undefined,
-): { accountId?: string; gatewayId?: string } {
-  if (!cred || cred.type !== "api_key") {
-    return {};
-  }
-  return {
-    accountId: cred?.metadata?.accountId?.trim() || undefined,
-    gatewayId: cred?.metadata?.gatewayId?.trim() || undefined,
-  };
-}
-
-function buildCloudflareConfigPatch(params: { accountId: string; gatewayId: string }) {
-  const baseUrl = resolveCloudflareAiGatewayBaseUrl(params);
-  return {
-    models: {
-      providers: {
-        [PROVIDER_ID]: {
-          baseUrl,
-          api: "anthropic-messages" as const,
-          models: [buildCloudflareAiGatewayModelDefinition()],
-        },
-      },
-    },
-    agents: {
-      defaults: {
-        models: {
-          [CLOUDFLARE_AI_GATEWAY_DEFAULT_MODEL_REF]: {
-            alias: "Cloudflare AI Gateway",
-          },
-        },
-      },
-    },
-  };
-}
 
 async function resolveCloudflareGatewayMetadataInteractive(ctx: {
   accountId?: string;
@@ -106,12 +52,11 @@ async function resolveCloudflareGatewayMetadataInteractive(ctx: {
   return { accountId, gatewayId };
 }
 
-const cloudflareAiGatewayPlugin = {
+export default definePluginEntry({
   id: PROVIDER_ID,
   name: "Cloudflare AI Gateway Provider",
   description: "Bundled Cloudflare AI Gateway provider plugin",
-  configSchema: emptyPluginConfigSchema(),
-  register(api: OpenClawPluginApi) {
+  register(api) {
     api.registerProvider({
       id: PROVIDER_ID,
       label: "Cloudflare AI Gateway",
@@ -180,7 +125,7 @@ const cloudflareAiGatewayPlugin = {
                   ),
                 },
               ],
-              configPatch: buildCloudflareConfigPatch(metadata),
+              configPatch: buildCloudflareAiGatewayConfigPatch(metadata),
               defaultModel: CLOUDFLARE_AI_GATEWAY_DEFAULT_MODEL_REF,
             };
           },
@@ -188,7 +133,15 @@ const cloudflareAiGatewayPlugin = {
             const authStore = ensureAuthProfileStore(ctx.agentDir, {
               allowKeychainPrompt: false,
             });
-            const storedMetadata = resolveMetadataFromCredential(authStore.profiles[PROFILE_ID]);
+            const storedMetadata =
+              authStore.profiles[PROFILE_ID]?.type === "api_key"
+                ? {
+                    accountId:
+                      authStore.profiles[PROFILE_ID]?.metadata?.accountId?.trim() || undefined,
+                    gatewayId:
+                      authStore.profiles[PROFILE_ID]?.metadata?.gatewayId?.trim() || undefined,
+                  }
+                : {};
             const accountId =
               normalizeOptionalSecretInput(ctx.opts.cloudflareAiGatewayAccountId) ??
               storedMetadata.accountId;
@@ -243,37 +196,22 @@ const cloudflareAiGatewayPlugin = {
           });
           const envManagedApiKey = ctx.env[PROVIDER_ENV_VAR]?.trim() ? PROVIDER_ENV_VAR : undefined;
           for (const profileId of listProfilesForProvider(authStore, PROVIDER_ID)) {
-            const cred = authStore.profiles[profileId];
-            if (!cred || cred.type !== "api_key") {
-              continue;
-            }
-            const apiKey = envManagedApiKey ?? resolveApiKeyFromCredential(cred);
-            if (!apiKey) {
-              continue;
-            }
-            const accountId = cred.metadata?.accountId?.trim();
-            const gatewayId = cred.metadata?.gatewayId?.trim();
-            if (!accountId || !gatewayId) {
-              continue;
-            }
-            const baseUrl = resolveCloudflareAiGatewayBaseUrl({ accountId, gatewayId });
-            if (!baseUrl) {
+            const provider = buildCloudflareAiGatewayCatalogProvider({
+              credential: authStore.profiles[profileId],
+              envApiKey: envManagedApiKey,
+            });
+            if (!provider) {
               continue;
             }
             return {
-              provider: {
-                baseUrl,
-                api: "anthropic-messages",
-                apiKey,
-                models: [buildCloudflareAiGatewayModelDefinition()],
-              },
+              provider,
             };
           }
           return null;
         },
       },
+      classifyFailoverReason: ({ errorMessage }) =>
+        /\bworkers?_ai\b.*\b(?:rate|limit|quota)\b/i.test(errorMessage) ? "rate_limit" : undefined,
     });
   },
-};
-
-export default cloudflareAiGatewayPlugin;
+});

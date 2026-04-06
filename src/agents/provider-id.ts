@@ -1,5 +1,8 @@
 export function normalizeProviderId(provider: string): string {
   const normalized = provider.trim().toLowerCase();
+  if (normalized === "modelstudio" || normalized === "qwencloud") {
+    return "qwen";
+  }
   if (normalized === "z.ai" || normalized === "z-ai") {
     return "zai";
   }
@@ -9,11 +12,8 @@ export function normalizeProviderId(provider: string): string {
   if (normalized === "opencode-go-auth") {
     return "opencode-go";
   }
-  if (normalized === "qwen") {
-    return "qwen-portal";
-  }
-  if (normalized === "kimi-code") {
-    return "kimi-coding";
+  if (normalized === "kimi" || normalized === "kimi-code" || normalized === "kimi-coding") {
+    return "kimi";
   }
   if (normalized === "bedrock" || normalized === "aws-bedrock") {
     return "amazon-bedrock";

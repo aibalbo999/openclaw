@@ -1,19 +1,22 @@
-import { emptyPluginConfigSchema, type OpenClawPluginApi } from "openclaw/plugin-sdk/core";
-import { buildHuggingfaceProvider } from "../../src/agents/models-config.providers.discovery.js";
-import {
-  applyHuggingfaceConfig,
-  HUGGINGFACE_DEFAULT_MODEL_REF,
-} from "../../src/commands/onboard-auth.js";
-import { createProviderApiKeyAuthMethod } from "../../src/plugins/provider-api-key-auth.js";
+import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
+import { createProviderApiKeyAuthMethod } from "openclaw/plugin-sdk/provider-auth-api-key";
+import { applyHuggingfaceConfig, HUGGINGFACE_DEFAULT_MODEL_REF } from "./onboard.js";
+import { buildHuggingfaceProvider } from "./provider-catalog.js";
 
 const PROVIDER_ID = "huggingface";
 
-const huggingfacePlugin = {
+type HuggingFacePluginConfig = {
+  discovery?: {
+    enabled?: boolean;
+  };
+};
+
+export default definePluginEntry({
   id: PROVIDER_ID,
   name: "Hugging Face Provider",
   description: "Bundled Hugging Face provider plugin",
-  configSchema: emptyPluginConfigSchema(),
-  register(api: OpenClawPluginApi) {
+  register(api) {
+    const pluginConfig = (api.pluginConfig ?? {}) as HuggingFacePluginConfig;
     api.registerProvider({
       id: PROVIDER_ID,
       label: "Hugging Face",
@@ -45,6 +48,11 @@ const huggingfacePlugin = {
       catalog: {
         order: "simple",
         run: async (ctx) => {
+          const discoveryEnabled =
+            pluginConfig.discovery?.enabled ?? ctx.config?.models?.huggingfaceDiscovery?.enabled;
+          if (discoveryEnabled === false) {
+            return null;
+          }
           const { apiKey, discoveryApiKey } = ctx.resolveProviderApiKey(PROVIDER_ID);
           if (!apiKey) {
             return null;
@@ -59,6 +67,4 @@ const huggingfacePlugin = {
       },
     });
   },
-};
-
-export default huggingfacePlugin;
+});

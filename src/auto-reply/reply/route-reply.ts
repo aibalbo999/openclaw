@@ -10,9 +10,10 @@
 import { resolveSessionAgentId } from "../../agents/agent-scope.js";
 import { resolveEffectiveMessagesConfig } from "../../agents/identity.js";
 import { getChannelPlugin, normalizeChannelId } from "../../channels/plugins/index.js";
+import { normalizeChatChannelId } from "../../channels/registry.js";
 import type { OpenClawConfig } from "../../config/config.js";
 import { buildOutboundSessionContext } from "../../infra/outbound/session-context.js";
-import { hasReplyContent } from "../../interactive/payload.js";
+import { hasReplyPayloadContent } from "../../interactive/payload.js";
 import { INTERNAL_MESSAGE_CHANNEL, normalizeMessageChannel } from "../../utils/message-channel.js";
 import type { OriginatingChannelType } from "../templating.js";
 import type { ReplyPayload } from "../types.js";
@@ -100,10 +101,14 @@ export async function routeReply(params: RouteReplyParams): Promise<RouteReplyRe
       : cfg.messages?.responsePrefix;
   const normalized = normalizeReplyPayload(payload, {
     responsePrefix,
-    enableSlackInteractiveReplies: plugin?.messaging?.enableInteractiveReplies?.({
-      cfg,
-      accountId,
-    }),
+    transformReplyPayload: plugin?.messaging?.transformReplyPayload
+      ? (nextPayload) =>
+          plugin.messaging?.transformReplyPayload?.({
+            payload: nextPayload,
+            cfg,
+            accountId,
+          }) ?? nextPayload
+      : undefined,
   });
   if (!normalized) {
     return { ok: true };
@@ -126,12 +131,16 @@ export async function routeReply(params: RouteReplyParams): Promise<RouteReplyRe
 
   // Skip empty replies.
   if (
-    !hasReplyContent({
-      text,
-      mediaUrls,
-      interactive: externalPayload.interactive,
-      hasChannelData,
-    })
+    !hasReplyPayloadContent(
+      {
+        ...externalPayload,
+        text,
+        mediaUrls,
+      },
+      {
+        hasChannelData,
+      },
+    )
   ) {
     return { ok: true };
   }
@@ -157,14 +166,11 @@ export async function routeReply(params: RouteReplyParams): Promise<RouteReplyRe
       threadId,
       replyToId,
     }) ?? null;
-  const resolvedReplyToId =
-    replyTransport?.replyToId ??
-    replyToId ??
-    ((channelId === "slack" || channelId === "mattermost") && threadId != null && threadId !== ""
-      ? String(threadId)
-      : undefined);
+  const resolvedReplyToId = replyTransport?.replyToId ?? replyToId ?? undefined;
   const resolvedThreadId =
-    replyTransport?.threadId ?? (channelId === "slack" ? null : (threadId ?? null));
+    replyTransport && Object.hasOwn(replyTransport, "threadId")
+      ? (replyTransport.threadId ?? null)
+      : (threadId ?? null);
 
   try {
     // Provider docking: this is an execution boundary (we're about to send).
@@ -221,5 +227,5 @@ export function isRoutableChannel(
   if (!channel || channel === INTERNAL_MESSAGE_CHANNEL) {
     return false;
   }
-  return normalizeChannelId(channel) !== null;
+  return normalizeChatChannelId(channel) !== null || normalizeChannelId(channel) !== null;
 }

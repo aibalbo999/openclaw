@@ -81,7 +81,7 @@ function resolveProviderApiKeyFromConfigAndStore(params: {
 
 async function resolveOAuthToken(params: {
   state: UsageAuthState;
-  provider: UsageProviderId;
+  provider: string;
 }): Promise<ProviderAuth | null> {
   const order = resolveAuthProfileOrder({
     cfg: params.state.cfg,
@@ -97,9 +97,9 @@ async function resolveOAuthToken(params: {
     }
     try {
       const resolved = await resolveApiKeyForProfile({
-        // Usage snapshots should work even if config profile metadata is stale.
-        // (e.g. config says api_key but the store has a token profile.)
-        cfg: undefined,
+        // Reuse the already-resolved config snapshot for token/ref resolution so
+        // usage snapshots don't trigger a second ambient loadConfig() call.
+        cfg: params.state.cfg,
         store: params.state.store,
         profileId,
         agentDir: params.state.agentDir,
@@ -108,7 +108,7 @@ async function resolveOAuthToken(params: {
         continue;
       }
       return {
-        provider: params.provider,
+        provider: params.provider as UsageProviderId,
         token: resolved.apiKey,
         accountId:
           cred.type === "oauth" && "accountId" in cred
@@ -142,10 +142,10 @@ async function resolveProviderUsageAuthViaPlugin(params: {
           providerIds: options?.providerIds ?? [params.provider],
           envDirect: options?.envDirect,
         }),
-      resolveOAuthToken: async () => {
+      resolveOAuthToken: async (options) => {
         const auth = await resolveOAuthToken({
           state: params.state,
-          provider: params.provider,
+          provider: options?.provider ?? params.provider,
         });
         return auth
           ? {
@@ -166,21 +166,49 @@ async function resolveProviderUsageAuthViaPlugin(params: {
   };
 }
 
+async function resolveProviderUsageAuthFallback(params: {
+  state: UsageAuthState;
+  provider: UsageProviderId;
+}): Promise<ProviderAuth | null> {
+  const oauthToken = await resolveOAuthToken({
+    state: params.state,
+    provider: params.provider,
+  });
+  if (oauthToken) {
+    return oauthToken;
+  }
+
+  const apiKey = resolveProviderApiKeyFromConfigAndStore({
+    state: params.state,
+    providerIds: [params.provider],
+  });
+  if (apiKey) {
+    return {
+      provider: params.provider,
+      token: apiKey,
+    };
+  }
+
+  return null;
+}
+
 export async function resolveProviderAuths(params: {
   providers: UsageProviderId[];
   auth?: ProviderAuth[];
   agentDir?: string;
+  config?: OpenClawConfig;
+  env?: NodeJS.ProcessEnv;
 }): Promise<ProviderAuth[]> {
   if (params.auth) {
     return params.auth;
   }
 
   const state: UsageAuthState = {
-    cfg: loadConfig(),
+    cfg: params.config ?? loadConfig(),
     store: ensureAuthProfileStore(params.agentDir, {
       allowKeychainPrompt: false,
     }),
-    env: process.env,
+    env: params.env ?? process.env,
     agentDir: params.agentDir,
   };
   const auths: ProviderAuth[] = [];
@@ -192,6 +220,14 @@ export async function resolveProviderAuths(params: {
     });
     if (pluginAuth) {
       auths.push(pluginAuth);
+      continue;
+    }
+    const fallbackAuth = await resolveProviderUsageAuthFallback({
+      state,
+      provider,
+    });
+    if (fallbackAuth) {
+      auths.push(fallbackAuth);
     }
   }
 

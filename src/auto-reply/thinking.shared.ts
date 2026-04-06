@@ -12,23 +12,20 @@ export type ThinkingCatalogEntry = {
 };
 
 const BASE_THINKING_LEVELS: ThinkLevel[] = ["off", "minimal", "low", "medium", "high", "adaptive"];
-
-export function normalizeProviderId(provider?: string | null): string {
-  if (!provider) {
-    return "";
-  }
-  const normalized = provider.trim().toLowerCase();
-  if (normalized === "z.ai" || normalized === "z-ai") {
-    return "zai";
-  }
-  if (normalized === "bedrock" || normalized === "aws-bedrock") {
-    return "amazon-bedrock";
-  }
-  return normalized;
-}
+const NO_THINKING_LEVELS: ThinkLevel[] = [...BASE_THINKING_LEVELS];
 
 export function isBinaryThinkingProvider(provider?: string | null): boolean {
-  return normalizeProviderId(provider) === "zai";
+  void provider;
+  return false;
+}
+
+export function supportsBuiltInXHighThinking(
+  provider?: string | null,
+  model?: string | null,
+): boolean {
+  void provider;
+  void model;
+  return false;
 }
 
 // Normalize user-provided thinking level strings to the canonical enum.
@@ -74,7 +71,7 @@ export function listThinkingLevels(
   _provider?: string | null,
   _model?: string | null,
 ): ThinkLevel[] {
-  return [...BASE_THINKING_LEVELS];
+  return [...NO_THINKING_LEVELS];
 }
 
 export function listThinkingLevelLabels(provider?: string | null, model?: string | null): string[] {

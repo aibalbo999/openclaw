@@ -5,9 +5,9 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import {
   clearSessionStoreCacheForTest,
   loadSessionStore,
-  type SessionEntry,
   saveSessionStore,
-} from "./sessions.js";
+} from "./sessions/store.js";
+import type { SessionEntry } from "./sessions/types.js";
 
 function createSessionEntry(overrides: Partial<SessionEntry> = {}): SessionEntry {
   return {
@@ -90,7 +90,7 @@ describe("Session Store Cache", () => {
   it("should not allow cached session mutations to leak across loads", async () => {
     const testStore = createSingleSessionStore(
       createSessionEntry({
-        cliSessionIds: { openai: "sess-1" },
+        origin: { provider: "openai" },
         skillsSnapshot: {
           prompt: "skills",
           skills: [{ name: "alpha" }],
@@ -101,13 +101,13 @@ describe("Session Store Cache", () => {
     await saveSessionStore(storePath, testStore);
 
     const loaded1 = loadSessionStore(storePath);
-    loaded1["session:1"].cliSessionIds = { openai: "mutated" };
+    loaded1["session:1"].origin = { provider: "mutated" };
     if (loaded1["session:1"].skillsSnapshot?.skills?.length) {
       loaded1["session:1"].skillsSnapshot.skills[0].name = "mutated";
     }
 
     const loaded2 = loadSessionStore(storePath);
-    expect(loaded2["session:1"].cliSessionIds?.openai).toBe("sess-1");
+    expect(loaded2["session:1"].origin?.provider).toBe("openai");
     expect(loaded2["session:1"].skillsSnapshot?.skills?.[0]?.name).toBe("alpha");
   });
 

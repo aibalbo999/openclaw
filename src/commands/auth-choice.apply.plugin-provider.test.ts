@@ -13,7 +13,7 @@ const resolveProviderPluginChoice = vi.hoisted(() =>
   vi.fn<() => { provider: ProviderPlugin; method: ProviderAuthMethod } | null>(),
 );
 const runProviderModelSelectedHook = vi.hoisted(() => vi.fn(async () => {}));
-vi.mock("./auth-choice.apply.plugin-provider.runtime.js", () => ({
+vi.mock("../plugins/provider-auth-choice.runtime.js", () => ({
   resolvePluginProviders,
   resolveProviderPluginChoice,
   runProviderModelSelectedHook,
@@ -44,23 +44,20 @@ vi.mock("../agents/agent-paths.js", () => ({
 }));
 
 const applyAuthProfileConfig = vi.hoisted(() => vi.fn((config) => config));
-vi.mock("./onboard-auth.js", () => ({
+vi.mock("../plugins/provider-auth-helpers.js", () => ({
   applyAuthProfileConfig,
 }));
 
 const isRemoteEnvironment = vi.hoisted(() => vi.fn(() => false));
-vi.mock("./oauth-env.js", () => ({
+const openUrl = vi.hoisted(() => vi.fn(async () => {}));
+vi.mock("../plugins/setup-browser.js", () => ({
   isRemoteEnvironment,
+  openUrl,
 }));
 
 const createVpsAwareOAuthHandlers = vi.hoisted(() => vi.fn());
-vi.mock("./oauth-flow.js", () => ({
+vi.mock("../plugins/provider-oauth-flow.js", () => ({
   createVpsAwareOAuthHandlers,
-}));
-
-const openUrl = vi.hoisted(() => vi.fn(async () => {}));
-vi.mock("./onboard-helpers.js", () => ({
-  openUrl,
 }));
 
 function buildProvider(): ProviderPlugin {
@@ -218,7 +215,7 @@ describe("applyAuthChoiceLoadedPluginProvider", () => {
       config: {
         agents: {
           defaults: {
-            model: { primary: "anthropic/claude-sonnet-4-5" },
+            model: { primary: "anthropic/claude-sonnet-4-6" },
           },
         },
       },
@@ -243,6 +240,64 @@ describe("applyAuthChoiceLoadedPluginProvider", () => {
       "Detected local Ollama runtime.\nPulled model metadata.",
       "Provider notes",
     );
+  });
+
+  it("replaces provider-owned default model maps during auth migrations", async () => {
+    const method: ProviderAuthMethod = {
+      id: "local",
+      label: "Local",
+      kind: "custom",
+      run: async () => ({
+        profiles: [],
+        configPatch: {
+          agents: {
+            defaults: {
+              model: {
+                primary: "codex-cli/gpt-5.4",
+                fallbacks: ["openai/gpt-5.2"],
+              },
+              models: {
+                "codex-cli/gpt-5.4": { alias: "Codex" },
+                "openai/gpt-5.2": {},
+              },
+            },
+          },
+        },
+        defaultModel: "codex-cli/gpt-5.4",
+      }),
+    };
+
+    const result = await runProviderPluginAuthMethod({
+      config: {
+        agents: {
+          defaults: {
+            model: {
+              primary: "anthropic/claude-sonnet-4-6",
+              fallbacks: ["anthropic/claude-opus-4-6", "openai/gpt-5.2"],
+            },
+            models: {
+              "anthropic/claude-sonnet-4-6": { alias: "Sonnet" },
+              "anthropic/claude-opus-4-6": { alias: "Opus" },
+              "openai/gpt-5.2": {},
+            },
+          },
+        },
+      },
+      runtime: {} as ApplyAuthChoiceParams["runtime"],
+      prompter: {
+        note: vi.fn(async () => {}),
+      } as unknown as ApplyAuthChoiceParams["prompter"],
+      method,
+    });
+
+    expect(result.config.agents?.defaults?.model).toEqual({
+      primary: "codex-cli/gpt-5.4",
+      fallbacks: ["openai/gpt-5.2"],
+    });
+    expect(result.config.agents?.defaults?.models).toEqual({
+      "codex-cli/gpt-5.4": { alias: "Codex" },
+      "openai/gpt-5.2": {},
+    });
   });
 
   it("returns an agent-scoped override for plugin auth choices when default model application is deferred", async () => {

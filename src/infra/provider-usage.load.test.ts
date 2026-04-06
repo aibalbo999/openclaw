@@ -1,26 +1,21 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createProviderUsageFetch, makeResponse } from "../test-utils/provider-usage-fetch.js";
 import { loadProviderUsageSummary } from "./provider-usage.load.js";
 import { ignoredErrors } from "./provider-usage.shared.js";
+import {
+  loadUsageWithAuth,
+  type ProviderUsageAuth,
+  usageNow,
+} from "./provider-usage.test-support.js";
 
-const usageNow = Date.UTC(2026, 0, 7, 0, 0, 0);
-
-type ProviderAuth = NonNullable<
-  NonNullable<Parameters<typeof loadProviderUsageSummary>[0]>["auth"]
->[number];
-
-async function loadUsageWithAuth(
-  auth: ProviderAuth[],
-  mockFetch: ReturnType<typeof createProviderUsageFetch>,
-) {
-  return await loadProviderUsageSummary({
-    now: usageNow,
-    auth,
-    fetch: mockFetch as unknown as typeof fetch,
-  });
-}
+type ProviderAuth = ProviderUsageAuth<typeof loadProviderUsageSummary>;
+const googleGeminiCliProvider = "google-gemini-cli" as unknown as ProviderAuth["provider"];
 
 describe("provider-usage.load", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("loads snapshots for copilot gemini codex and xiaomi", async () => {
     const mockFetch = createProviderUsageFetch(async (url) => {
       if (url.includes("api.github.com/copilot_internal/user")) {
@@ -53,9 +48,10 @@ describe("provider-usage.load", () => {
     });
 
     const summary = await loadUsageWithAuth(
+      loadProviderUsageSummary,
       [
         { provider: "github-copilot", token: "copilot-token" },
-        { provider: "google-gemini-cli", token: "gemini-token" },
+        { provider: googleGeminiCliProvider, token: "gemini-token" },
         { provider: "openai-codex", token: "codex-token", accountId: "acc-1" },
         { provider: "xiaomi", token: "xiaomi-token" },
       ],
@@ -64,7 +60,7 @@ describe("provider-usage.load", () => {
 
     expect(summary.providers.map((provider) => provider.provider)).toEqual([
       "github-copilot",
-      "google-gemini-cli",
+      googleGeminiCliProvider,
       "openai-codex",
       "xiaomi",
     ]);
@@ -72,8 +68,8 @@ describe("provider-usage.load", () => {
       summary.providers.find((provider) => provider.provider === "github-copilot")?.windows,
     ).toEqual([{ label: "Chat", usedPercent: 20 }]);
     expect(
-      summary.providers.find((provider) => provider.provider === "google-gemini-cli")?.windows[0]
-        ?.label,
+      summary.providers.find((provider) => provider.provider === googleGeminiCliProvider)
+        ?.windows[0]?.label,
     ).toBe("Pro");
     expect(
       summary.providers.find((provider) => provider.provider === "openai-codex")?.windows[0]?.label,
@@ -85,13 +81,14 @@ describe("provider-usage.load", () => {
 
   it("returns empty provider list when auth resolves to none", async () => {
     const mockFetch = createProviderUsageFetch(async () => makeResponse(404, "not found"));
-    const summary = await loadUsageWithAuth([], mockFetch);
+    const summary = await loadUsageWithAuth(loadProviderUsageSummary, [], mockFetch);
     expect(summary).toEqual({ updatedAt: usageNow, providers: [] });
   });
 
   it("returns unsupported provider snapshots for unknown provider ids", async () => {
     const mockFetch = createProviderUsageFetch(async () => makeResponse(404, "not found"));
     const summary = await loadUsageWithAuth(
+      loadProviderUsageSummary,
       [{ provider: "unsupported-provider", token: "token-u" }] as unknown as ProviderAuth[],
       mockFetch,
     );
@@ -109,6 +106,7 @@ describe("provider-usage.load", () => {
     ignoredErrors.add("HTTP 500");
     try {
       const summary = await loadUsageWithAuth(
+        loadProviderUsageSummary,
         [{ provider: "anthropic", token: "token-a" }],
         mockFetch,
       );
